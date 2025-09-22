@@ -1,122 +1,117 @@
-#include <stdio.h>
-#include <ctype.h>
-#include <stdbool.h>
+# g++ lexical_analyzer.cpp -o lexical_analyzer
+# /usr/bin/env ./lexical_analyzer
+# def f (int a) {
+# x = x + a;
+# return;
+# }
 
-/* ----------
-   Scanner “char a char” com DFAs por token:
+#include <iostream>
+#include <cctype>
+#include <string>
+#include <limits>
 
-   getIdent:
-     q0 --(letra|_)--> q1
-     q1 --(letra|digito|_)--> q1
-     q1 --(outro)--> aceita, devolve 1 char (ungetc) e retorna IDENT
+using std::cin;
+using std::cout;
+using std::endl;
 
-   getOutro:
-     q0 --(nao-branco e nao-letra)--> aceita (consome 1 char e retorna OUTRO)
-     (nota: dígitos entram como OUTRO)
-   ---------- */
-
-static int nextc(FILE *in) {
-    return fgetc(in);
+// Utilitários para ler/devolver caractere
+static inline int nextc(std::istream& in) {
+    return in.get(); // retorna EOF (traits::eof) em fim
 }
 
-static void putback(int c, FILE *in) {
-    if (c != EOF) ungetc(c, in);
+static inline void putback(int c, std::istream& in) {
+    if (c != std::char_traits<char>::eof())
+        in.putback(static_cast<char>(c));
 }
 
-/* Tenta reconhecer um IDENT a partir da posição atual.
-   Sucesso: consome todo o lexema e retorna 1.
-   Falha: não consome nada relevante (recoloca o primeiro char) e retorna 0. */
-static int getIdent(FILE *in) {
+// DFA: IDENT = letra|_ ( letra|digito|_ )*
+static bool getIdent(std::istream& in) {
     int state = 0;
     int c = nextc(in);
 
-    switch (state) {
-        case 0:
-            if (isalpha(c) || c == '_') {
-                state = 1;
-            } else {
-                putback(c, in);
-                return 0; // fail at q0
-            }
-            break;
+    // q0
+    if (c == std::char_traits<char>::eof()) return false;
+    if (std::isalpha((unsigned char)c) || c == '_') {
+        state = 1;
+    } else {
+        putback(c, in);
+        return false; // falha em q0
     }
 
-    // state 1: loop enquanto for válido para IDENT
-    while (1) {
+    // q1: loop
+    while (true) {
         c = nextc(in);
-        if (isalnum(c) || c == '_') {
-            // permanece em state 1
-            continue;
+        if (c != std::char_traits<char>::eof()
+            && (std::isalnum((unsigned char)c) || c == '_')) {
+            continue; // permanece em q1
         } else {
-            // estado de aceitação: devolve o lookahead
+            // aceita: devolve lookahead
             putback(c, in);
-            return 1;
+            return true;
         }
     }
 }
 
-/* Tenta reconhecer OUTRO: um único caractere que não é espaço/tab/nl
-   e não inicia IDENT (i.e., não é letra/underscore). Dígitos viram OUTRO. */
-static int getOutro(FILE *in) {
+// DFA: OUTRO = um único caractere que não é branco e não inicia IDENT
+// (i.e., não é letra nem '_'). Dígitos contam como OUTRO.
+static bool getOutro(std::istream& in) {
     int state = 0;
     int c = nextc(in);
+    if (c == std::char_traits<char>::eof()) return false;
 
-    switch (state) {
-        case 0:
-            if (c == EOF) return 0;
-            if (!isspace(c) && !(isalpha(c) || c == '_')) {
-                // aceita consumindo um único caractere
-                return 1;
-            } else {
-                putback(c, in);
-                return 0; // fail
-            }
+    // q0
+    if (!std::isspace((unsigned char)c) && !(std::isalpha((unsigned char)c) || c == '_')) {
+        // aceita consumindo UM caractere
+        return true;
+    } else {
+        putback(c, in);
+        return false;
     }
-    return 0;
 }
 
-int main(void) {
+int main() {
+    std::ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+
     int c;
     bool start_of_line = true;
 
-    while ((c = fgetc(stdin)) != EOF) {
-        // Trata quebras de linha: preserva linhas de saída (não é token)
+    while (true) {
+        c = cin.get();
+        if (c == std::char_traits<char>::eof()) break;
+
         if (c == '\n') {
-            putchar('\n');
+            cout << '\n';
             start_of_line = true;
             continue;
         }
 
-        // Ignora brancos (exceto '\n' já tratado)
+        // BRANCO (exceto newline já tratado) é ignorado
         if (c == ' ' || c == '\t' || c == '\r' || c == '\f' || c == '\v') {
             continue;
         }
 
-        // Precisamos tentar tokens a partir deste caractere: devolve ao fluxo
-        ungetc(c, stdin);
+        // precisamos tentar tokens a partir deste caractere: devolve ao fluxo
+        cin.putback(static_cast<char>(c));
 
-        // Tenta IDENT pela DFA correspondente
-        if (getIdent(stdin)) {
-            if (!start_of_line) putchar(' ');
-            fputs("IDENT", stdout);
+        if (getIdent(cin)) {
+            if (!start_of_line) cout << ' ';
+            cout << "IDENT";
             start_of_line = false;
             continue;
         }
 
-        // Tenta OUTRO (caractere único)
-        if (getOutro(stdin)) {
-            if (!start_of_line) putchar(' ');
-            fputs("OUTRO", stdout);
+        if (getOutro(cin)) {
+            if (!start_of_line) cout << ' ';
+            cout << "OUTRO";
             start_of_line = false;
             continue;
         }
 
-        // Se chegou aqui, consumimos um char “problemático” para não travar.
-        // (Opcionalmente, poderia sinalizar erro.)
-        (void)fgetc(stdin);
+        // fallback: consome 1 caractere para evitar loop infinito
+        cin.get();
     }
 
-    // Garante newline final opcional
-    if (!start_of_line) putchar('\n');
+    if (!start_of_line) cout << '\n';
     return 0;
 }
